@@ -33,6 +33,7 @@ class Cartpole:
 
         # task-specific parameters
         self.num_obs = 4  # pole_angle + pole_vel + cart_vel + cart_pos
+        self.num_act = 1  # force applied on the pole (-1 to 1)
         self.reset_dist = 3.0  # when to reset
         self.max_push_effort = 400.0  # the range of force applied to the cartpole
         self.max_episode_length = 500  # maximum episode length
@@ -41,7 +42,6 @@ class Cartpole:
         self.obs_buf = torch.zeros((self.args.num_envs, self.num_obs), device=self.args.sim_device)
         self.reward_buf = torch.zeros(self.args.num_envs, device=self.args.sim_device)
         self.reset_buf = torch.ones(self.args.num_envs, device=self.args.sim_device, dtype=torch.long)
-        self.timeout_buf = torch.zeros(self.args.num_envs, device=self.args.sim_device, dtype=torch.long)
         self.progress_buf = torch.zeros(self.args.num_envs, device=self.args.sim_device, dtype=torch.long)
 
         # acquire gym interface
@@ -68,7 +68,7 @@ class Cartpole:
         plane_params.normal = gymapi.Vec3(0, 0, 1)
         self.gym.add_ground(self.sim, plane_params)
 
-        # define environment space
+        # define environment space (for visualisation)
         spacing = 2.5
         lower = gymapi.Vec3(0, 0, 0)
         upper = gymapi.Vec3(spacing, spacing, spacing)
@@ -129,12 +129,7 @@ class Cartpole:
             env_ids = torch.arange(self.args.num_envs)
 
         self.gym.refresh_dof_state_tensor(self.sim)
-
-        # self.obs_buf[env_ids] = self.dof_states[env_ids]
-        self.obs_buf[env_ids, 0] = self.dof_pos[env_ids, 0].squeeze()
-        self.obs_buf[env_ids, 1] = self.dof_vel[env_ids, 0].squeeze()
-        self.obs_buf[env_ids, 2] = self.dof_pos[env_ids, 1].squeeze()
-        self.obs_buf[env_ids, 3] = self.dof_vel[env_ids, 1].squeeze()
+        self.obs_buf[env_ids] = self.dof_states[env_ids]
 
     def get_reward(self):
         # define reward function here using JIT
@@ -143,11 +138,7 @@ class Cartpole:
             # type: (Tensor, float, Tensor, Tensor, float) -> Tuple[Tensor, Tensor]
 
             # retrieve each state from observation buffer
-            # cart_pos, cart_vel, pole_angle, pole_vel = torch.split(obs_buf, [1, 1, 1, 1], dim=1)
-            pole_angle = obs_buf[:, 2]
-            pole_vel = obs_buf[:, 3]
-            cart_vel = obs_buf[:, 1]
-            cart_pos = obs_buf[:, 0]
+            cart_pos, cart_vel, pole_angle, pole_vel = torch.split(obs_buf, [1, 1, 1, 1], dim=1)
 
             # reward is combo of angle deviated from upright, velocity of cart, and velocity of pole moving
             reward = 1.0 - pole_angle * pole_angle - 0.01 * torch.abs(cart_vel) - 0.005 * torch.abs(pole_vel)
@@ -158,7 +149,7 @@ class Cartpole:
             reset = torch.where(torch.abs(cart_pos) > reset_dist, torch.ones_like(reset_buf), reset_buf)
             reset = torch.where(torch.abs(pole_angle) > np.pi / 2, torch.ones_like(reset_buf), reset)
             reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), reset)
-            return reward, reset
+            return reward[:, 0], reset[:, 0]
 
         self.reward_buf[:], self.reset_buf[:] = compute_cartpole_reward(self.dof_states,
                                                                         self.reset_dist,
@@ -206,7 +197,7 @@ class Cartpole:
     def step(self, actions):
         # apply action
         actions_tensor = torch.zeros(self.args.num_envs * self.num_dof, device=self.args.sim_device)
-        actions_tensor[::self.num_dof] = actions * self.max_push_effort
+        actions_tensor[::self.num_dof] = actions.squeeze(-1) * self.max_push_effort
         forces = gymtorch.unwrap_tensor(actions_tensor)
         self.gym.set_dof_actuation_force_tensor(self.sim, forces)
 
@@ -224,5 +215,3 @@ class Cartpole:
         # refresh observation and reward buffer
         self.get_obs()
         self.get_reward()
-
-

@@ -15,8 +15,7 @@ class ReplayBuffer:
     def push(self, obs, action, reward, next_obs, done):
         self.buffer.append(tuple([obs, action, reward, next_obs, done]))
 
-    def sample(self, batch_size):
-        mini_batch_size = int(batch_size / self.num_envs)
+    def sample(self, mini_batch_size):
         obs, action, reward, next_obs, done = zip(*random.sample(self.buffer, mini_batch_size))
 
         rand_idx = torch.randperm(mini_batch_size * self.num_envs)  # random shuffle tensors

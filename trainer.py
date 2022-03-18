@@ -1,3 +1,4 @@
+# from ppo import PPO
 from policy import Policy
 
 import torch
@@ -20,7 +21,18 @@ args = parser.parse_args()
 torch.manual_seed(0)
 random.seed(0)
 
-policy = Policy(args, discount=0.99, batch_size=512 * 128, tau=0.9999, lr=1e-4, device=args.sim_device)
+# env = Cartpole(args)
+policy = Policy(args)
+
+# ppo = PPO(args)
+
 
 while True:
     policy.run()
+
+# a = []
+# while True:
+#     act = 2 * (torch.rand(args.num_envs, device=args.sim_device) - 0.5)
+#     env.step(act)
+#     # print(env.obs_buf, env.reward_buf, env.reset_buf)
+#     a.append(env.obs_buf)
