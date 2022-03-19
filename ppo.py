@@ -9,28 +9,34 @@ from torch.distributions import Normal
 
 # define network architecture here
 class Net(nn.Module):
-    def __init__(self, num_inputs=4, num_outputs=1):
+    def __init__(self, num_obs=4, num_act=1):
         super(Net, self).__init__()
         # we use a shared backbone for both actor and critic
         self.shared_net = nn.Sequential(
-            nn.Linear(num_inputs, 256),
+            nn.Linear(num_obs, 256),
             nn.ReLU(),
         )
 
         # mean and variance for Actor Network
         self.to_mean = nn.Sequential(
-            nn.Linear(256, num_outputs),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, num_act),
             nn.Tanh()
         )
 
         self.to_std = nn.Sequential(
-            nn.Linear(256, num_outputs),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, num_act),
             nn.Softplus()
         )
 
         # value for Critic Network
         self.to_value = nn.Sequential(
-            nn.Linear(256, 1)
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
         )
 
     def pi(self, x):
@@ -46,16 +52,20 @@ class Net(nn.Module):
 
 class PPO:
     def __init__(self, args):
+        self.args = args
+
+        # initialise parameters
         self.env = Cartpole(args)
 
         self.epoch = 5
         self.lr = 3e-4
-        self.gamma = 0.9
-        self.lmbda = 0.9
+        self.gamma = 0.99
+        self.lmbda = 0.95
         self.clip = 0.2
-        self.rollout_size = 128
-        self.chunk_size = 32
+        self.rollout_size = 64
+        self.chunk_size = 8
         self.mini_chunk_size = self.rollout_size // self.chunk_size
+        self.mini_batch_size = self.args.num_envs * self.mini_chunk_size
         self.num_eval_freq = 100
 
         self.data = []
@@ -70,25 +80,25 @@ class PPO:
         # organise data and make batch
         data = []
         for _ in range(self.chunk_size):
-            s_lst, a_lst, r_lst, s_prime_lst, log_prob_lst, done_lst = [], [], [], [], [], []
+            obs_lst, a_lst, r_lst, next_obs_lst, log_prob_lst, done_lst = [], [], [], [], [], []
             for _ in range(self.mini_chunk_size):
                 rollout = self.data.pop()
-                s, a, r, s_prime, log_prob, done = rollout
+                obs, action, reward, next_obs, log_prob, done = rollout
 
-                s_lst.append(s)
-                a_lst.append(a)
-                r_lst.append(r)
-                s_prime_lst.append(s_prime)
+                obs_lst.append(obs)
+                a_lst.append(action)
+                r_lst.append(reward.unsqueeze(-1))
+                next_obs_lst.append(next_obs)
                 log_prob_lst.append(log_prob)
-                done_lst.append(done)
+                done_lst.append(done.unsqueeze(-1))
 
-            s, a, r, s_prime, done = \
-                torch.cat(s_lst), torch.cat(a_lst), torch.cat(r_lst), torch.cat(s_prime_lst), torch.cat(done_lst)
+            obs, action, reward, next_obs, done = \
+                torch.stack(obs_lst), torch.stack(a_lst), torch.stack(r_lst), torch.stack(next_obs_lst), torch.stack(done_lst)
 
-            # compute reward-to-go
+            # compute reward-to-go (target)
             with torch.no_grad():
-                target = r + self.gamma * self.net.v(s_prime) * done
-                delta = target - self.net.v(s)
+                target = reward + self.gamma * self.net.v(next_obs) * done
+                delta = target - self.net.v(obs)
 
             # compute advantage
             advantage_lst = []
@@ -97,19 +107,12 @@ class PPO:
                 advantage = self.gamma * self.lmbda * advantage + delta_t
                 advantage_lst.insert(0, advantage)
 
-            advantage = torch.cat(advantage_lst)
-            log_prob = torch.cat(log_prob_lst)
+            advantage = torch.stack(advantage_lst)
+            log_prob = torch.stack(log_prob_lst)
 
-            mini_batch = (s, a, log_prob, target, advantage)
+            mini_batch = (obs, action, log_prob, target, advantage)
             data.append(mini_batch)
         return data
-
-    def act(self, s):
-        mu, std = self.net.pi(s)
-        dist = Normal(mu, std)
-        a = dist.sample()
-        log_prob = dist.log_prob(a)
-        return a, log_prob
 
     def update(self):
         # update actor and critic network
@@ -117,15 +120,18 @@ class PPO:
 
         for i in range(self.epoch):
             for mini_batch in data:
-                s, a, old_log_prob, target, advantage = mini_batch
+                obs, action, old_log_prob, target, advantage = mini_batch
 
-                _, log_prob = self.act(s)
+                mu, std = self.net.pi(obs)
+                dist = Normal(mu, std)
+                log_prob = dist.log_prob(action)
 
                 ratio = torch.exp(log_prob - old_log_prob)
 
                 surr1 = ratio * advantage
                 surr2 = torch.clamp(ratio, 1 - self.clip, 1 + self.clip) * advantage
-                loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(self.net.v(s), target)
+
+                loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(self.net.v(obs), target)
 
                 self.optim.zero_grad()
                 loss.mean().backward()
@@ -136,24 +142,28 @@ class PPO:
 
     def run(self):
         # collect data
-        s = self.env.obs_buf
+        obs = self.env.obs_buf.clone()
 
         with torch.no_grad():
-            a, log_prob = self.act(s)
+            mu, std = self.net.pi(obs)
+            dist = Normal(mu, std)
+            action = dist.sample()
+            log_prob = dist.log_prob(action)
 
-        s_prime, r, done = self.env.step(a)
-        self.data.append((s, a, r.unsqueeze(-1).float(), s_prime, log_prob, 1 - done.unsqueeze(-1).float()))
+        self.env.step(action)
+        next_obs, reward, done = self.env.obs_buf.clone(), self.env.reward_buf.clone(), self.env.reset_buf.clone()
+        self.data.append((obs, action, reward, next_obs, log_prob, 1 - done))
 
-        self.score += r.float().mean().item()
+        self.score += torch.mean(reward.float()).item() / self.num_eval_freq
 
-        # update policy
+        # training mode
         if len(self.data) == self.rollout_size:
             self.update()
 
-        # evaluation
-        if (self.run_step + 1) % self.num_eval_freq == 0:
+        # evaluation mode
+        if self.run_step % self.num_eval_freq == 0:
             print('Steps: {:04d} | Opt Step: {:04d} | Reward {:.04f} |'
-                  .format(self.run_step, self.optim_step, self.score / self.num_eval_freq))
+                  .format(self.run_step, self.optim_step, self.score))
             self.score = 0
 
         self.run_step += 1

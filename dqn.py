@@ -34,7 +34,7 @@ def soft_update(net, net_target, tau):
         param_target.data.copy_(param_target.data * tau + param.data * (1.0 - tau))
 
 
-class Policy:
+class DQN:
     def __init__(self, args):
         self.args = args
 

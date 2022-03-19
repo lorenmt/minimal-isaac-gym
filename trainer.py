@@ -1,5 +1,5 @@
-# from ppo import PPO
-from policy import Policy
+from dqn import DQN
+from ppo import PPO
 
 import torch
 import random
@@ -15,24 +15,17 @@ parser.add_argument('--compute_device_id', default=0, type=int)
 parser.add_argument('--graphics_device_id', type=int, default=0, help='Graphics Device ID')
 parser.add_argument('--num_envs', default=512, type=int)
 parser.add_argument('--headless', action='store_true')
+parser.add_argument('--method', default='ppo', type=str)
 
 args = parser.parse_args()
 
 torch.manual_seed(0)
 random.seed(0)
 
-# env = Cartpole(args)
-policy = Policy(args)
-
-# ppo = PPO(args)
-
+if args.method == 'ppo':
+    policy = PPO(args)
+elif args.method == 'dqn':
+    policy = DQN(args)
 
 while True:
     policy.run()
-
-# a = []
-# while True:
-#     act = 2 * (torch.rand(args.num_envs, device=args.sim_device) - 0.5)
-#     env.step(act)
-#     # print(env.obs_buf, env.reward_buf, env.reset_buf)
-#     a.append(env.obs_buf)

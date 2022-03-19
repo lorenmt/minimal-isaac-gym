@@ -109,11 +109,11 @@ class Cartpole:
         return envs, num_dof
 
     def create_viewer(self):
-        # create viewer for debugging (looking at the center of the last environment)
+        # create viewer for debugging (looking at the center of environment)
         viewer = self.gym.create_viewer(self.sim, gymapi.CameraProperties())
-        cam_pos = gymapi.Vec3(1, 0.0, 1.5)
-        cam_target = gymapi.Vec3(0, 0, 0)
-        self.gym.viewer_camera_look_at(viewer, self.envs[-1], cam_pos, cam_target)
+        cam_pos = gymapi.Vec3(10, 0.0, 5)
+        cam_target = gymapi.Vec3(-1, 0, 0)
+        self.gym.viewer_camera_look_at(viewer, self.envs[self.args.num_envs // 2], cam_pos, cam_target)
         return viewer
 
     def get_states_tensor(self):
