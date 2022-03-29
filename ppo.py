@@ -57,12 +57,12 @@ class PPO:
         # initialise parameters
         self.env = Cartpole(args)
 
-        self.epoch = 5
+        self.epoch = 10
         self.lr = 3e-4
         self.gamma = 0.99
         self.lmbda = 0.95
         self.clip = 0.2
-        self.rollout_size = 64
+        self.rollout_size = 128
         self.chunk_size = 8
         self.mini_chunk_size = self.rollout_size // self.chunk_size
         self.mini_batch_size = self.args.num_envs * self.mini_chunk_size
@@ -152,6 +152,8 @@ class PPO:
 
         self.env.step(action)
         next_obs, reward, done = self.env.obs_buf.clone(), self.env.reward_buf.clone(), self.env.reset_buf.clone()
+        self.env.reset()
+
         self.data.append((obs, action, reward, next_obs, log_prob, 1 - done))
 
         self.score += torch.mean(reward.float()).item() / self.num_eval_freq

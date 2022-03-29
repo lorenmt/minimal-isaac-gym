@@ -60,7 +60,7 @@ class Cartpole:
 
         # step simulation to initialise tensor buffers
         self.gym.prepare_sim(self.sim)
-        self.simulate()
+        self.reset()
 
     def create_envs(self):
         # add ground plane
@@ -126,7 +126,7 @@ class Cartpole:
     def get_obs(self, env_ids=None):
         # get state observation from each environment id
         if env_ids is None:
-            env_ids = torch.arange(self.args.num_envs)
+            env_ids = torch.arange(self.args.num_envs, device=self.args.sim_device)
 
         self.gym.refresh_dof_state_tensor(self.sim)
         self.obs_buf[env_ids] = self.dof_states[env_ids]
@@ -157,9 +157,11 @@ class Cartpole:
                                                                         self.progress_buf,
                                                                         self.max_episode_length)
 
-    def reset(self, env_ids=None):
-        if env_ids is None:
-            env_ids = torch.arange(self.args.num_envs)
+    def reset(self):
+        env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+
+        if len(env_ids) == 0:
+            return
 
         # randomise initial positions and velocities
         positions = 0.2 * (torch.rand((len(env_ids), self.num_dof), device=self.args.sim_device) - 0.5)
@@ -176,6 +178,9 @@ class Cartpole:
         # clear up desired buffer states
         self.reset_buf[env_ids] = 0
         self.progress_buf[env_ids] = 0
+
+        # refresh new observation after reset
+        self.get_obs()
 
     def simulate(self):
         # step the physics
@@ -208,10 +213,6 @@ class Cartpole:
 
         # reset environments if required
         self.progress_buf += 1
-        env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
-        if len(env_ids) > 0:
-            self.reset(env_ids)
 
-        # refresh observation and reward buffer
         self.get_obs()
         self.get_reward()
