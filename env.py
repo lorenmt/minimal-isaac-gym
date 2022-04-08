@@ -132,25 +132,6 @@ class Cartpole:
         self.obs_buf[env_ids] = self.dof_states[env_ids]
 
     def get_reward(self):
-        # define reward function here using JIT
-        @torch.jit.script
-        def compute_cartpole_reward(obs_buf, reset_dist, reset_buf, progress_buf, max_episode_length):
-            # type: (Tensor, float, Tensor, Tensor, float) -> Tuple[Tensor, Tensor]
-
-            # retrieve each state from observation buffer
-            cart_pos, cart_vel, pole_angle, pole_vel = torch.split(obs_buf, [1, 1, 1, 1], dim=1)
-
-            # reward is combo of angle deviated from upright, velocity of cart, and velocity of pole moving
-            reward = 1.0 - pole_angle * pole_angle - 0.01 * torch.abs(cart_vel) - 0.005 * torch.abs(pole_vel)
-
-            # adjust reward for reset agents
-            reward = torch.where(torch.abs(cart_pos) > reset_dist, torch.ones_like(reward) * -2.0, reward)
-            reward = torch.where(torch.abs(pole_angle) > np.pi / 2, torch.ones_like(reward) * -2.0, reward)
-            reset = torch.where(torch.abs(cart_pos) > reset_dist, torch.ones_like(reset_buf), reset_buf)
-            reset = torch.where(torch.abs(pole_angle) > np.pi / 2, torch.ones_like(reset_buf), reset)
-            reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), reset)
-            return reward[:, 0], reset[:, 0]
-
         self.reward_buf[:], self.reset_buf[:] = compute_cartpole_reward(self.dof_states,
                                                                         self.reset_dist,
                                                                         self.reset_buf,
@@ -216,3 +197,23 @@ class Cartpole:
 
         self.get_obs()
         self.get_reward()
+
+
+# define reward function using JIT
+@torch.jit.script
+def compute_cartpole_reward(obs_buf, reset_dist, reset_buf, progress_buf, max_episode_length):
+    # type: (Tensor, float, Tensor, Tensor, float) -> Tuple[Tensor, Tensor]
+
+    # retrieve each state from observation buffer
+    cart_pos, cart_vel, pole_angle, pole_vel = torch.split(obs_buf, [1, 1, 1, 1], dim=1)
+
+    # reward is combo of angle deviated from upright, velocity of cart, and velocity of pole moving
+    reward = 1.0 - pole_angle * pole_angle - 0.01 * torch.abs(cart_vel) - 0.005 * torch.abs(pole_vel)
+
+    # adjust reward for reset agents
+    reward = torch.where(torch.abs(cart_pos) > reset_dist, torch.ones_like(reward) * -2.0, reward)
+    reward = torch.where(torch.abs(pole_angle) > np.pi / 2, torch.ones_like(reward) * -2.0, reward)
+    reset = torch.where(torch.abs(cart_pos) > reset_dist, torch.ones_like(reset_buf), reset_buf)
+    reset = torch.where(torch.abs(pole_angle) > np.pi / 2, torch.ones_like(reset_buf), reset)
+    reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), reset)
+    return reward[:, 0], reset[:, 0]
