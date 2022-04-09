@@ -18,7 +18,7 @@ parser.add_argument('--headless', action='store_true')
 parser.add_argument('--method', default='ppo', type=str)
 
 args = parser.parse_args()
-# args.headless = True
+args.headless = True
 
 torch.manual_seed(0)
 random.seed(0)

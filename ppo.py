@@ -24,6 +24,7 @@ class Net(nn.Module):
             nn.Linear(256, 256),
             nn.LeakyReLU(),
             nn.Linear(256, num_act),
+            nn.Tanh()
         )
 
         # value for Critic Network
@@ -156,7 +157,7 @@ class PPO:
 
         self.score += torch.mean(reward.float()).item() / self.num_eval_freq
 
-        self.action_var = torch.max(0.05 * torch.ones_like(self.action_var), self.action_var - 0.00002)
+        self.action_var = torch.max(0.01 * torch.ones_like(self.action_var), self.action_var - 0.00002)
 
         # training mode
         if len(self.data) == self.rollout_size:
