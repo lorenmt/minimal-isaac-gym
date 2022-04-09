@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch.distributions import Normal
+from torch.distributions import MultivariateNormal
 
 
 # define network architecture here
@@ -14,35 +14,29 @@ class Net(nn.Module):
         # we use a shared backbone for both actor and critic
         self.shared_net = nn.Sequential(
             nn.Linear(num_obs, 256),
-            nn.ReLU(),
+            nn.LeakyReLU(),
+            nn.Linear(256, 256),
+            nn.LeakyReLU()
         )
 
         # mean and variance for Actor Network
         self.to_mean = nn.Sequential(
             nn.Linear(256, 256),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Linear(256, num_act),
-            nn.Tanh()
-        )
-
-        self.to_std = nn.Sequential(
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, num_act),
-            nn.Softplus()
         )
 
         # value for Critic Network
         self.to_value = nn.Sequential(
             nn.Linear(256, 256),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Linear(256, 1),
         )
 
     def pi(self, x):
         x = self.shared_net(x)
-        mu, std = self.to_mean(x), self.to_std(x)
-        return mu, std
+        mu = self.to_mean(x)
+        return mu
 
     def v(self, x):
         x = self.shared_net(x)
@@ -57,13 +51,13 @@ class PPO:
         # initialise parameters
         self.env = Cartpole(args)
 
-        self.epoch = 10
+        self.epoch = 5
         self.lr = 3e-4
         self.gamma = 0.99
         self.lmbda = 0.95
-        self.clip = 0.2
+        self.clip = 0.3
         self.rollout_size = 128
-        self.chunk_size = 8
+        self.chunk_size = 32
         self.mini_chunk_size = self.rollout_size // self.chunk_size
         self.mini_batch_size = self.args.num_envs * self.mini_chunk_size
         self.num_eval_freq = 100
@@ -74,6 +68,7 @@ class PPO:
         self.optim_step = 0
 
         self.net = Net(self.env.num_obs, self.env.num_act).to(args.sim_device)
+        self.action_var = torch.full((self.env.num_act,), 0.1).to(args.sim_device)
         self.optim = torch.optim.Adam(self.net.parameters(), lr=self.lr)
 
     def make_data(self):
@@ -122,11 +117,12 @@ class PPO:
             for mini_batch in data:
                 obs, action, old_log_prob, target, advantage = mini_batch
 
-                mu, std = self.net.pi(obs)
-                dist = Normal(mu, std)
+                mu = self.net.pi(obs)
+                cov_mat = torch.diag(self.action_var)
+                dist = MultivariateNormal(mu, cov_mat)
                 log_prob = dist.log_prob(action)
 
-                ratio = torch.exp(log_prob - old_log_prob)
+                ratio = torch.exp(log_prob - old_log_prob).unsqueeze(-1)
 
                 surr1 = ratio * advantage
                 surr2 = torch.clamp(ratio, 1 - self.clip, 1 + self.clip) * advantage
@@ -145,10 +141,12 @@ class PPO:
         obs = self.env.obs_buf.clone()
 
         with torch.no_grad():
-            mu, std = self.net.pi(obs)
-            dist = Normal(mu, std)
+            mu = self.net.pi(obs)
+            cov_mat = torch.diag(self.action_var)
+            dist = MultivariateNormal(mu, cov_mat)
             action = dist.sample()
             log_prob = dist.log_prob(action)
+            action = action.clip(-1, 1)
 
         self.env.step(action)
         next_obs, reward, done = self.env.obs_buf.clone(), self.env.reward_buf.clone(), self.env.reset_buf.clone()
@@ -158,14 +156,16 @@ class PPO:
 
         self.score += torch.mean(reward.float()).item() / self.num_eval_freq
 
+        self.action_var = torch.max(0.05 * torch.ones_like(self.action_var), self.action_var - 0.00002)
+
         # training mode
         if len(self.data) == self.rollout_size:
             self.update()
 
         # evaluation mode
         if self.run_step % self.num_eval_freq == 0:
-            print('Steps: {:04d} | Opt Step: {:04d} | Reward {:.04f} |'
-                  .format(self.run_step, self.optim_step, self.score))
+            print('Steps: {:04d} | Opt Step: {:04d} | Reward {:.04f} | Action Var {:.04f}'
+                  .format(self.run_step, self.optim_step, self.score, self.action_var[0].item()))
             self.score = 0
 
         self.run_step += 1
