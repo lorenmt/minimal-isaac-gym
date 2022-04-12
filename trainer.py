@@ -1,5 +1,6 @@
 from dqn import DQN
 from ppo import PPO
+from ppo_discrete import PPO_Discrete
 
 import torch
 import random
@@ -25,6 +26,8 @@ random.seed(0)
 
 if args.method == 'ppo':
     policy = PPO(args)
+elif args.method == 'ppo_d':
+    policy = PPO_Discrete(args)
 elif args.method == 'dqn':
     policy = DQN(args)
 
