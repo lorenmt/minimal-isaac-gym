@@ -17,6 +17,7 @@ parser.add_argument('--graphics_device_id', type=int, default=0, help='Graphics 
 parser.add_argument('--num_envs', default=512, type=int)
 parser.add_argument('--headless', action='store_true')
 parser.add_argument('--method', default='ppo', type=str)
+parser.add_argument('--train_time_step', type=int, default=10000)
 
 args = parser.parse_args()
 args.headless = True
@@ -31,5 +32,5 @@ elif args.method == 'ppo_d':
 elif args.method == 'dqn':
     policy = DQN(args)
 
-while True:
+for i in range(args.train_time_step):
     policy.run()

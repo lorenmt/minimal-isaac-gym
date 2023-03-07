@@ -1,6 +1,7 @@
 from env import Cartpole
 from replay import ReplayBuffer
 
+import numpy as np
 import torch.distributions
 import torch.nn as nn
 import torch.nn.functional as F
@@ -37,6 +38,7 @@ def soft_update(net, net_target, tau):
 class DQN:
     def __init__(self, args):
         self.args = args
+        # setup for evaluation
 
         # initialise parameters
         self.env = Cartpole(args)
@@ -52,6 +54,7 @@ class DQN:
 
         self.run_step = 1
         self.score = 0
+        self.max_eval_step = 100
 
         # define Q-network
         self.q        = Net(num_act=self.act_space).to(self.args.sim_device)
@@ -104,7 +107,6 @@ class DQN:
         action = self.act(obs, epsilon)
         self.env.step(action)
         next_obs, reward, done = self.env.obs_buf.clone(), self.env.reward_buf.clone(), self.env.reset_buf.clone()
-        self.env.reset()
 
         self.replay.push(obs, action, reward, next_obs, 1 - done)
 
@@ -118,5 +120,18 @@ class DQN:
                 print('Steps: {:04d} | Reward {:.04f} | TD Loss {:.04f} Epsilon {:.04f} Buffer {:03d}'
                       .format(self.run_step, self.score, loss.item(), epsilon, self.replay.size()))
                 self.score = 0
+
+                # full traj evaluate
+                self.env.reset()
+                self.eval_score = 0
+                self.eval_step = 0
+                for i in range(self.max_eval_step):
+                    obs = self.env.obs_buf.clone()
+                    action = self.act(obs, epsilon)
+                    self.env.step(action)
+                    _, reward, done = self.env.obs_buf.clone(), self.env.reward_buf.clone(), self.env.reset_buf.clone()
+                    self.eval_score += reward.clone().cpu().numpy()
+                    self.eval_step += 1
+                print("Full trajectory evaluate: reward in {} step {}".format(self.max_eval_step,self.eval_score.mean()))
 
         self.run_step += 1
