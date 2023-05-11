@@ -78,7 +78,7 @@ class PPO_Discrete:
         for _ in range(self.chunk_size):
             obs_lst, a_lst, r_lst, next_obs_lst, log_prob_lst, done_lst = [], [], [], [], [], []
             for _ in range(self.mini_chunk_size):
-                rollout = self.data.pop()
+                rollout = self.data.pop(0)
                 obs, action, reward, next_obs, log_prob, done = rollout
 
                 obs_lst.append(obs)
